@@ -8,13 +8,13 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-  name: "Ensures vault deposit works correctly",
+  name: "Ensures STX vault deposit works correctly",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     const wallet1 = accounts.get('wallet_1')!;
     
     let block = chain.mineBlock([
-      Tx.contractCall('fin-vault', 'deposit', [
+      Tx.contractCall('fin-vault', 'deposit-stx', [
         types.uint(1000000)
       ], wallet1.address)
     ]);
@@ -24,7 +24,8 @@ Clarinet.test({
     // Check balance
     let balanceBlock = chain.mineBlock([
       Tx.contractCall('fin-vault', 'get-balance', [
-        types.principal(wallet1.address)
+        types.principal(wallet1.address),
+        types.none()
       ], wallet1.address)
     ]);
     
@@ -33,13 +34,14 @@ Clarinet.test({
 });
 
 Clarinet.test({
-  name: "Ensures withdrawal flow works with proper authorization",
+  name: "Ensures token deposit and withdrawal flow works",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     const wallet1 = accounts.get('wallet_1')!;
     const wallet2 = accounts.get('wallet_2')!;
+    const tokenContract = deployer.address + '.test-token';
     
-    // Setup: Add authorized signers and whitelist
+    // Setup: Add authorized signers, whitelist addresses and token
     let setup = chain.mineBlock([
       Tx.contractCall('fin-vault', 'add-authorized-signer', [
         types.principal(wallet1.address)
@@ -49,23 +51,30 @@ Clarinet.test({
       ], deployer.address),
       Tx.contractCall('fin-vault', 'add-whitelisted-address', [
         types.principal(wallet1.address)
+      ], deployer.address),
+      Tx.contractCall('fin-vault', 'add-whitelisted-token', [
+        types.principal(tokenContract)
       ], deployer.address)
     ]);
     
     setup.receipts.map(receipt => receipt.result.expectOk());
     
-    // Deposit
+    // Deposit tokens
     let deposit = chain.mineBlock([
-      Tx.contractCall('fin-vault', 'deposit', [
+      Tx.contractCall('fin-vault', 'deposit-token', [
+        types.principal(tokenContract),
         types.uint(1000000)
       ], wallet1.address)
     ]);
+    
+    deposit.receipts[0].result.expectOk();
     
     // Request withdrawal
     let request = chain.mineBlock([
       Tx.contractCall('fin-vault', 'request-withdrawal', [
         types.uint(500000),
-        types.principal(wallet1.address)
+        types.principal(wallet1.address),
+        types.some(types.principal(tokenContract))
       ], wallet1.address)
     ]);
     
@@ -98,26 +107,19 @@ Clarinet.test({
 });
 
 Clarinet.test({
-  name: "Ensures emergency freeze works",
+  name: "Ensures non-whitelisted token deposits are rejected",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     const wallet1 = accounts.get('wallet_1')!;
+    const invalidToken = deployer.address + '.invalid-token';
     
-    // Activate emergency freeze
-    let freeze = chain.mineBlock([
-      Tx.contractCall('fin-vault', 'emergency-freeze', [], deployer.address)
-    ]);
-    
-    freeze.receipts[0].result.expectOk();
-    
-    // Try withdrawal during freeze
-    let withdrawal = chain.mineBlock([
-      Tx.contractCall('fin-vault', 'request-withdrawal', [
-        types.uint(1000),
-        types.principal(wallet1.address)
+    let deposit = chain.mineBlock([
+      Tx.contractCall('fin-vault', 'deposit-token', [
+        types.principal(invalidToken),
+        types.uint(1000000)
       ], wallet1.address)
     ]);
     
-    withdrawal.receipts[0].result.expectErr(types.uint(101));
+    deposit.receipts[0].result.expectErr(types.uint(106));
   }
 });
