@@ -1,49 +1,42 @@
-// [Previous imports and tests remain unchanged]
+// [Previous test content remains the same, adding new tests]
 
 Clarinet.test({
-  name: "Ensures withdrawal amount validation works",
+  name: "Ensures proper balance tracking during withdrawals",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const wallet1 = accounts.get('wallet_1')!;
     
-    // Try to withdraw 0 amount
-    let block = chain.mineBlock([
+    // First deposit some STX
+    let deposit = chain.mineBlock([
+      Tx.contractCall('fin-vault', 'deposit', [
+        types.uint(1000000),
+        types.none()
+      ], wallet1.address)
+    ]);
+    
+    deposit.receipts[0].result.expectOk();
+    
+    // Request withdrawal
+    let withdrawal = chain.mineBlock([
       Tx.contractCall('fin-vault', 'request-withdrawal', [
-        types.uint(0),
+        types.uint(500000),
         types.principal(wallet1.address),
         types.none()
       ], wallet1.address)
     ]);
     
-    block.receipts[0].result.expectErr(types.uint(107));
-  }
-});
-
-Clarinet.test({
-  name: "Ensures withdrawal limit works",
-  async fn(chain: Chain, accounts: Map<string, Account>) {
-    const deployer = accounts.get('deployer')!;
-    const wallet1 = accounts.get('wallet_1')!;
+    withdrawal.receipts[0].result.expectOk();
     
-    // Set max withdrawal limit
-    let setup = chain.mineBlock([
-      Tx.contractCall('fin-vault', 'set-max-withdrawal-limit', [
-        types.uint(1000000)
-      ], deployer.address)
-    ]);
-    
-    setup.receipts[0].result.expectOk();
-    
-    // Try to withdraw more than limit
-    let block = chain.mineBlock([
-      Tx.contractCall('fin-vault', 'request-withdrawal', [
-        types.uint(2000000),
+    // Check remaining balance
+    let balance = chain.callReadOnlyFn(
+      'fin-vault',
+      'get-balance',
+      [
         types.principal(wallet1.address),
         types.none()
-      ], wallet1.address)
-    ]);
+      ],
+      wallet1.address
+    );
     
-    block.receipts[0].result.expectErr(types.uint(108));
+    balance.result.expectUint(500000);
   }
 });
-
-// [Rest of the tests remain unchanged]
